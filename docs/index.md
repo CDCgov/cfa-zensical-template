@@ -4,6 +4,10 @@
 
      If you're migrating from mkdocs, see [those instructions](migrating_from_mkdocs.md).
 
+!!! warning
+
+    CFA policy requires that publicly-available documentation should only by used for documentation of software, not scientific results or publications.
+
 1. Ensure you have at least `docs/index.md`.
 1. Copy `zensical.toml` to your repo. Update the block at the top and remove unneeded plugins.
 1. Copy `.github/workflows/docs.yaml`. In your repo, set Settings | Pages | Source to GitHub Actions.

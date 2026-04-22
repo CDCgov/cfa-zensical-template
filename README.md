@@ -1,15 +1,13 @@
-# CFA zensical template repo
+# CFA zensical template
+
+_Formerly cfa-mkdocs-repo_
 
 [zensical](https://zensical.org/docs/get-started/) is a tool for building simple static documentation from Markdown files, with extensions allowing for:
 
 - Auto-generating Python API documentation
 - Deploying documents to GitHub Pages
 
-The GitHub Pages for this repo are built using zensical: <https://cdcgov.github.io/cfa-mkdocs-template/>.
-
-> [!CAUTION]
->
-> CFA policy requires that publicly-available documentation should only by used for documentation of software, not scientific results or publications.
+See the [GitHub Pages](https://cdcgov.github.io/cfa-mkdocs-template/), built using zensical, for information on how to use this repo.
 
 ## Project Admin
 
