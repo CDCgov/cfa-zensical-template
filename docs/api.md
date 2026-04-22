@@ -1,8 +1,5 @@
-# API reference
+# Example: API reference
 
-<!--
-  Change this to the things you want documented.
-  See https://mkdocstrings.github.io/
--->
+See the [zensical](https://zensical.org/docs/setup/extensions/mkdocstrings/) and [mkdocstrings](https://mkdocstrings.github.io/) documentation for more details.
 
-::: mkdtemp
+::: toy_package
