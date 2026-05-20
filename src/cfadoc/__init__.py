@@ -271,6 +271,46 @@ def _cleanup_mkdocs_files() -> None:
         console.print("[green]Removed[/] docs/javascript")
 
 
+def _find_legacy_mkdocs_workflows() -> list[Path]:
+    workflows_dir = Path(".github/workflows")
+    if not workflows_dir.exists():
+        return []
+
+    legacy_files: list[Path] = []
+    for workflow_path in sorted(workflows_dir.glob("*.y*ml")):
+        try:
+            content = workflow_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        if "mkdocs" in content.lower():
+            legacy_files.append(workflow_path)
+
+    return legacy_files
+
+
+def _cleanup_legacy_mkdocs_workflows() -> None:
+    legacy_workflows = _find_legacy_mkdocs_workflows()
+    if not legacy_workflows:
+        return
+
+    selected = _ask(
+        Q.checkbox(
+            "Select legacy mkdocs workflow files to remove:",
+            choices=[
+                Q.Choice(str(path), value=path, checked=True)
+                for path in legacy_workflows
+            ],
+        )
+    )
+
+    for workflow_path in selected:
+        try:
+            workflow_path.unlink()
+            console.print(f"[green]Removed[/] {workflow_path}")
+        except Exception as err:
+            console.print(f"[red]Failed[/] removing {workflow_path}: {err}")
+
+
 def _ensure_api_stub(package_name: str) -> None:
     api_md = Path("docs/api.md")
     if api_md.exists():
@@ -510,8 +550,9 @@ def _run_cli() -> None:
     has_mkdocs_yaml = Path("mkdocs.yaml").exists()
     has_docs_js = Path("docs/javascript").exists()
     legacy_deps = sorted(LEGACY_DOCS_DEPS & dep_names)
+    legacy_workflows = _find_legacy_mkdocs_workflows()
 
-    if has_mkdocs_yaml or has_docs_js or legacy_deps:
+    if has_mkdocs_yaml or has_docs_js or legacy_deps or legacy_workflows:
         detected: list[str] = []
         if has_mkdocs_yaml:
             detected.append("mkdocs.yaml")
@@ -519,6 +560,10 @@ def _run_cli() -> None:
             detected.append("docs/javascript")
         if legacy_deps:
             detected.append(f"legacy deps: {', '.join(legacy_deps)}")
+        if legacy_workflows:
+            detected.append(
+                "legacy workflows: " + ", ".join(str(path) for path in legacy_workflows)
+            )
         console.print(
             f"[cyan]Detected legacy mkdocs setup:[/] {'; '.join(detected)}. "
             "Will offer migration cleanups where relevant."
@@ -535,6 +580,7 @@ def _run_cli() -> None:
     _update_gitignore()
 
     _cleanup_mkdocs_files()
+    _cleanup_legacy_mkdocs_workflows()
     dependency_group = _run_dependency_updates(pyproject_data)
 
     _validate_build(dependency_group)
