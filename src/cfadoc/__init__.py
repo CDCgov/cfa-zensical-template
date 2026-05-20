@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
+LEGACY_DOCS_DEPS = {"mkdocs", "mkdocs-material", "mkdocstrings"}
 
 
 def _ask(question):
@@ -101,6 +102,27 @@ def _collect_dependency_names(pyproject_data: dict) -> set[str]:
         for dep in entries:
             names.add(_dep_base_name(dep))
     return names
+
+
+def _dependency_locations(pyproject_data: dict) -> dict[str, set[str | None]]:
+    """Map dependency name to where it is declared.
+
+    Uses None for main project.dependencies, and group name for dependency-groups.
+    """
+    locations: dict[str, set[str | None]] = {}
+
+    project = pyproject_data.get("project", {})
+    for dep in project.get("dependencies", []):
+        name = _dep_base_name(dep)
+        locations.setdefault(name, set()).add(None)
+
+    groups = pyproject_data.get("dependency-groups", {})
+    for group_name, entries in groups.items():
+        for dep in entries:
+            name = _dep_base_name(dep)
+            locations.setdefault(name, set()).add(group_name)
+
+    return locations
 
 
 def _confirm_or_edit(label: str, detected: str | None, default_fallback: str) -> str:
@@ -284,15 +306,29 @@ def _update_gitignore() -> None:
 
 def _run_dependency_updates(pyproject_data: dict) -> str:
     names = _collect_dependency_names(pyproject_data)
+    dep_locations = _dependency_locations(pyproject_data)
+
+    docs_default_group = "docs"
+    for candidate in ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]:
+        for location in sorted(
+            dep_locations.get(candidate, set()), key=lambda x: "" if x is None else x
+        ):
+            if location is not None:
+                docs_default_group = location
+                break
+        else:
+            continue
+        break
+
     group = _ask(
         Q.text(
             "Dependency group for docs packages (leave blank for default group):",
-            default="docs",
+            default=docs_default_group,
         )
     ).strip()
     group_args = ["--group", group] if group else []
 
-    legacy = sorted({"mkdocs", "mkdocs-material"} & names)
+    legacy = sorted(LEGACY_DOCS_DEPS & names)
     if legacy:
         if _ask(
             Q.confirm(
@@ -300,24 +336,56 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
                 default=True,
             )
         ):
-            ok, out = _run(["uv", "remove", *group_args, *legacy])
-            console.print(
-                "[green]Done[/] uv remove ..." if ok else f"[red]Failed[/] {out}"
-            )
+            for dep in legacy:
+                locations = dep_locations.get(dep, set())
+                if not locations:
+                    continue
+                for location in sorted(locations, key=lambda x: "" if x is None else x):
+                    command = ["uv", "remove"]
+                    if location is not None:
+                        command += ["--group", location]
+                    command.append(dep)
+                    ok, out = _run(command)
+                    label = (
+                        f"{dep} from group '{location}'"
+                        if location is not None
+                        else f"{dep} from main dependencies"
+                    )
+                    console.print(
+                        f"[green]Removed[/] {label}"
+                        if ok
+                        else f"[red]Failed[/] {label}: {out}"
+                    )
 
     missing = [
         dep
         for dep in ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
         if dep not in names
     ]
-    if missing and _ask(
-        Q.confirm(
-            f"Add missing docs dependencies: {', '.join(missing)}?",
-            default=True,
+    if missing:
+        selected = _ask(
+            Q.checkbox(
+                "Select docs dependencies to add (space to toggle, enter to confirm):",
+                choices=[
+                    Q.Choice(dep, checked=True)
+                    for dep in [
+                        "zensical",
+                        "mdx-truly-sane-lists",
+                        "mkdocstrings-python",
+                    ]
+                    if dep in missing
+                ],
+            )
         )
-    ):
-        ok, out = _run(["uv", "add", *group_args, *missing])
-        console.print("[green]Done[/] uv add ..." if ok else f"[red]Failed[/] {out}")
+        if selected:
+            ok, out = _run(["uv", "add", *group_args, *selected])
+            console.print(
+                "[green]Done[/] uv add ..." if ok else f"[red]Failed[/] {out}"
+            )
+        else:
+            console.print(
+                "[yellow]Skipped[/] no docs dependencies selected for install"
+            )
 
     return group
 
@@ -385,7 +453,7 @@ def _run_cli() -> None:
     dep_names = _collect_dependency_names(pyproject_data)
     has_mkdocs_yaml = Path("mkdocs.yaml").exists()
     has_docs_js = Path("docs/javascript").exists()
-    legacy_deps = sorted({"mkdocs", "mkdocs-material"} & dep_names)
+    legacy_deps = sorted(LEGACY_DOCS_DEPS & dep_names)
 
     if has_mkdocs_yaml or has_docs_js or legacy_deps:
         detected: list[str] = []
