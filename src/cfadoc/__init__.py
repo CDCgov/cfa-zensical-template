@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import tomllib
@@ -8,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import questionary as Q
+import yaml
 from rich.console import Console
 from rich.panel import Panel
 
@@ -208,6 +210,24 @@ def _ensure_zensical_toml() -> None:
         )
     )
 
+    # if mkdocs.yaml exists, copy nav from that
+    if mkdocs_yaml := _find_mkdocs_yaml():
+        with open(mkdocs_yaml) as f:
+            content = yaml.safe_load(f)
+
+        assert "nav" in content
+        nav_paths = content["nav"]
+    # otherwise, list the files in docs/
+    else:
+        # remove the docs/ prefix
+        nav_paths = [Path(*p.parts[1:]) for p in Path("docs").glob("*.md")]
+        # ensure that index.md comes first
+        first = Path("index.md")
+        assert first in nav_paths
+        nav_paths.insert(0, nav_paths.pop(nav_paths.index(first)))
+
+    nav = json.dumps(nav_paths)
+
     content = _render_template(
         "zensical.toml",
         {
@@ -216,6 +236,7 @@ def _ensure_zensical_toml() -> None:
             "repo_url": repo_url,
             "repo_name": repo_name,
             "python_path": python_path,
+            "nav": nav,
         },
     )
 
@@ -252,11 +273,21 @@ def _ensure_docs_workflow() -> None:
     console.print("[green]Wrote[/] .github/workflows/docs.yaml")
 
 
+def _find_mkdocs_yaml() -> Path | None:
+    paths = [Path(x) for x in ["mkdocs.yaml", "mkdocs.yml"] if Path(x).exists()]
+    if len(paths) == 0:
+        return None
+    if len(paths) == 1:
+        return paths[0]
+    else:
+        raise RuntimeError("Multiple mkdocs yaml's detected")
+
+
 def _cleanup_mkdocs_files() -> None:
-    mkdocs_yaml = Path("mkdocs.yaml")
-    if mkdocs_yaml.exists() and _ask(Q.confirm("Remove mkdocs.yaml?", default=True)):
-        mkdocs_yaml.unlink()
-        console.print("[green]Removed[/] mkdocs.yaml")
+    if mkdocs_yaml := _find_mkdocs_yaml():
+        if _ask(Q.confirm(f"Remove {mkdocs_yaml}?", default=True)):
+            mkdocs_yaml.unlink()
+            console.print(f"[green]Removed[/] {mkdocs_yaml}")
 
     docs_js = Path("docs/javascript")
     if docs_js.exists() and _ask(
@@ -309,6 +340,17 @@ def _cleanup_legacy_mkdocs_workflows() -> None:
             console.print(f"[green]Removed[/] {workflow_path}")
         except Exception as err:
             console.print(f"[red]Failed[/] removing {workflow_path}: {err}")
+
+
+def _readme_mentions_mkdocs() -> bool:
+    readme_path = Path("README.md")
+    if not readme_path.exists():
+        return False
+    try:
+        content = readme_path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    return "mkdocs" in content.lower()
 
 
 def _ensure_api_stub(package_name: str) -> None:
@@ -547,15 +589,15 @@ def _run_cli() -> None:
     package_name = _detect_package_name()
     pyproject_data = _read_toml(Path("pyproject.toml"))
     dep_names = _collect_dependency_names(pyproject_data)
-    has_mkdocs_yaml = Path("mkdocs.yaml").exists()
+    mkdocs_yaml = _find_mkdocs_yaml()
     has_docs_js = Path("docs/javascript").exists()
     legacy_deps = sorted(LEGACY_DOCS_DEPS & dep_names)
     legacy_workflows = _find_legacy_mkdocs_workflows()
 
-    if has_mkdocs_yaml or has_docs_js or legacy_deps or legacy_workflows:
+    if mkdocs_yaml or has_docs_js or legacy_deps or legacy_workflows:
         detected: list[str] = []
-        if has_mkdocs_yaml:
-            detected.append("mkdocs.yaml")
+        if mkdocs_yaml:
+            detected.append(str(mkdocs_yaml))
         if has_docs_js:
             detected.append("docs/javascript")
         if legacy_deps:
@@ -588,7 +630,8 @@ def _run_cli() -> None:
 
     console.print("\n[bold]Manual follow-ups:[/bold]")
     console.print("- In GitHub repo settings, set Pages source to GitHub Actions")
-    console.print("- Update README notes if you are migrating from mkdocs")
+    if _readme_mentions_mkdocs():
+        console.print("- README.md mentions 'mkdocs'. Consider revising it.")
 
 
 def cli() -> None:
