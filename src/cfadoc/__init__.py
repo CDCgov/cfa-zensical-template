@@ -361,21 +361,34 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
 
     docs_packages = ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
     spec_map = _dependency_specs_by_location(pyproject_data)
+    relocations: list[tuple[str, str, str]] = []
+    deps_in_target_group: set[str] = set()
     for dep in docs_packages:
         entries = spec_map.get(dep, [])
-        has_target_group = any(location == group for location, _ in entries)
+        if any(location == group for location, _ in entries):
+            deps_in_target_group.add(dep)
         for location, spec in entries:
             if location is None or location == group:
                 continue
-            move = _ask(
-                Q.confirm(
-                    (f"Detected {dep} in group '{location}'. Move it to '{group}'?"),
-                    default=True,
-                )
-            )
-            if not move:
-                continue
+            relocations.append((dep, location, spec))
 
+    if relocations:
+        selected_indexes = _ask(
+            Q.checkbox(
+                f"Select dependencies to move into group '{group}':",
+                choices=[
+                    Q.Choice(
+                        title=f"{dep} (from '{location}')",
+                        value=index,
+                        checked=True,
+                    )
+                    for index, (dep, location, _spec) in enumerate(relocations)
+                ],
+            )
+        )
+
+        for index in selected_indexes:
+            dep, location, spec = relocations[index]
             remove_ok, remove_out = _run(["uv", "remove", "--group", location, dep])
             if not remove_ok:
                 console.print(
@@ -385,12 +398,12 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
 
             console.print(f"[green]Removed[/] {dep} from group '{location}'")
 
-            if has_target_group:
+            if dep in deps_in_target_group:
                 continue
 
             add_ok, add_out = _run(["uv", "add", "--group", group, spec])
             if add_ok:
-                has_target_group = True
+                deps_in_target_group.add(dep)
                 console.print(f"[green]Added[/] {spec} to group '{group}'")
             else:
                 console.print(
