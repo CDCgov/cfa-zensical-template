@@ -213,7 +213,7 @@ def _ensure_zensical_toml() -> None:
     # if mkdocs.yaml exists, copy nav from that
     if mkdocs_yaml := _find_mkdocs_yaml():
         with open(mkdocs_yaml) as f:
-            content = yaml.load(f, Loader=yaml.Loader)
+            content = yaml.load(f, Loader=yaml.UnsafeLoader)
 
         assert "nav" in content
         nav_paths = content["nav"]
