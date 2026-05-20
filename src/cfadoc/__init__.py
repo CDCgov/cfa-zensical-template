@@ -126,15 +126,6 @@ def _dependency_locations(pyproject_data: dict) -> dict[str, set[str | None]]:
 
 
 def _confirm_or_edit(label: str, detected: str | None, default_fallback: str) -> str:
-    if detected:
-        use_detected = _ask(
-            Q.confirm(
-                f"Detected {label}: {detected}. Use this?",
-                default=True,
-            )
-        )
-        if use_detected:
-            return detected
     return _ask(Q.text(f"Enter {label}:", default=detected or default_fallback))
 
 
