@@ -9,9 +9,16 @@ _Formerly cfa-mkdocs-repo_
 
 See the [GitHub Pages](https://cdcgov.github.io/cfa-mkdocs-template/), built using zensical, for information on how to use this repo.
 
+## Getting started
+
+- Enter the top level of the repo you want to work in
+- `uvx run --from git+https://github.com/CDCgov/cfa-zensical-template cfadoc`
+
 ## Project Admin
 
 Scott Olesen <ulp7@cdc.gov> (CDC/CFA)
+
+---
 
 ## Disclaimers
 
