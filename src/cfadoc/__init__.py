@@ -125,6 +125,26 @@ def _dependency_locations(pyproject_data: dict) -> dict[str, set[str | None]]:
     return locations
 
 
+def _dependency_specs_by_location(
+    pyproject_data: dict,
+) -> dict[str, list[tuple[str | None, str]]]:
+    """Map dependency name to raw spec strings by location."""
+    specs: dict[str, list[tuple[str | None, str]]] = {}
+
+    project = pyproject_data.get("project", {})
+    for dep in project.get("dependencies", []):
+        name = _dep_base_name(dep)
+        specs.setdefault(name, []).append((None, dep))
+
+    groups = pyproject_data.get("dependency-groups", {})
+    for group_name, entries in groups.items():
+        for dep in entries:
+            name = _dep_base_name(dep)
+            specs.setdefault(name, []).append((group_name, dep))
+
+    return specs
+
+
 def _confirm_or_edit(label: str, detected: str | None, default_fallback: str) -> str:
     return _ask(Q.text(f"Enter {label}:", default=detected or default_fallback))
 
@@ -299,25 +319,16 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
     names = _collect_dependency_names(pyproject_data)
     dep_locations = _dependency_locations(pyproject_data)
 
-    docs_default_group = "docs"
-    for candidate in ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]:
-        for location in sorted(
-            dep_locations.get(candidate, set()), key=lambda x: "" if x is None else x
-        ):
-            if location is not None:
-                docs_default_group = location
-                break
-        else:
-            continue
-        break
-
     group = _ask(
         Q.text(
-            "Dependency group for docs packages (leave blank for default group):",
-            default=docs_default_group,
+            "Dependency group for docs packages:",
+            default="docs",
+            validate=lambda value: (
+                True if value.strip() else "Please enter a dependency group name."
+            ),
         )
     ).strip()
-    group_args = ["--group", group] if group else []
+    group_args = ["--group", group]
 
     legacy = sorted(LEGACY_DOCS_DEPS & names)
     if legacy:
@@ -347,6 +358,47 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
                         if ok
                         else f"[red]Failed[/] {label}: {out}"
                     )
+
+    docs_packages = ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
+    spec_map = _dependency_specs_by_location(pyproject_data)
+    for dep in docs_packages:
+        entries = spec_map.get(dep, [])
+        has_target_group = any(location == group for location, _ in entries)
+        for location, spec in entries:
+            if location is None or location == group:
+                continue
+            move = _ask(
+                Q.confirm(
+                    (f"Detected {dep} in group '{location}'. Move it to '{group}'?"),
+                    default=True,
+                )
+            )
+            if not move:
+                continue
+
+            remove_ok, remove_out = _run(["uv", "remove", "--group", location, dep])
+            if not remove_ok:
+                console.print(
+                    f"[red]Failed[/] removing {dep} from group '{location}': {remove_out}"
+                )
+                continue
+
+            console.print(f"[green]Removed[/] {dep} from group '{location}'")
+
+            if has_target_group:
+                continue
+
+            add_ok, add_out = _run(["uv", "add", "--group", group, spec])
+            if add_ok:
+                has_target_group = True
+                console.print(f"[green]Added[/] {spec} to group '{group}'")
+            else:
+                console.print(
+                    f"[red]Failed[/] adding {spec} to group '{group}': {add_out}"
+                )
+
+    pyproject_data = _read_toml(Path("pyproject.toml"))
+    names = _collect_dependency_names(pyproject_data)
 
     missing = [
         dep
