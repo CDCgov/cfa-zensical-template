@@ -1,10 +1,13 @@
 [project]
-site_name = "CFA zensical template"
-site_url = "https://cdcgov.github.io/cfa-zensical-template"
-repo_url = "https://github.com/cdcgov/cfa-zensical-template"
-repo_name = "cfa-zensical-template"
+site_name = "{{site_name}}"
+site_url = "{{site_url}}"
+repo_url = "{{repo_url}}"
+repo_name = "{{repo_name}}"
 
-nav = ["index.md", "migrating_from_mkdocs.md", "api.md"]
+nav = ["index.md", "migrating_from_mkdocs.md", "example.md", "api.md"]
+
+# provides for math rendering
+extra_javascript = ["https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"]
 
 [project.theme]
 language = "en"
@@ -53,6 +56,11 @@ generic = true
 
 [project.markdown_extensions.pymdownx.details]
 
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+    { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+
 [project.markdown_extensions.pymdownx.tasklist]
 custom_checkbox = true
 
@@ -65,7 +73,7 @@ pygments_lang_class = true
 
 [project.plugins.mkdocstrings.handlers.python]
 inventories = ["https://docs.python.org/3/objects.inv"]
-paths = ["src/cfadoc"]
+paths = ["{{python_path}}"]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "google"

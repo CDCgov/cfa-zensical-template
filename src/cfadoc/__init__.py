@@ -1,2 +1,429 @@
-def cli():
-    print("hello world")
+from __future__ import annotations
+
+import re
+import subprocess
+import tomllib
+from importlib import resources
+from pathlib import Path
+from urllib.parse import urlparse
+
+import questionary as Q
+from rich.console import Console
+from rich.panel import Panel
+
+console = Console()
+
+
+def _ask(question):
+    answer = question.ask()
+    if answer is None:
+        raise KeyboardInterrupt
+    return answer
+
+
+def _run(command: list[str]) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return False, f"Command not found: {command[0]}"
+    except subprocess.CalledProcessError as err:
+        details = err.stderr.strip() or err.stdout.strip() or str(err)
+        return False, details
+    return True, (result.stdout.strip() or result.stderr.strip())
+
+
+def _load_template(name: str) -> str:
+    template_path = resources.files("cfadoc.templates").joinpath(name)
+    return template_path.read_text(encoding="utf-8")
+
+
+def _render_template(template_name: str, values: dict[str, str]) -> str:
+    content = _load_template(template_name)
+    for key, value in values.items():
+        content = content.replace(f"{{{{{key}}}}}", value)
+    return content
+
+
+def _read_toml(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+    except Exception:
+        return {}
+
+
+def _normalize_repo_url(remote: str) -> str | None:
+    remote = remote.strip()
+    if not remote:
+        return None
+    if remote.startswith("git@") and ":" in remote:
+        host, path = remote.split(":", 1)
+        host = host.split("@", 1)[1]
+        path = path.removesuffix(".git")
+        return f"https://{host}/{path}"
+    if remote.startswith(("https://", "http://")):
+        return remote.removesuffix(".git")
+    return None
+
+
+def _github_site_url(repo_url: str) -> tuple[str | None, str | None]:
+    parsed = urlparse(repo_url)
+    if parsed.netloc.lower() != "github.com":
+        return None, None
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        return None, None
+    owner, repo_name = parts[0], parts[1]
+    return repo_name, f"https://{owner}.github.io/{repo_name}"
+
+
+def _dep_base_name(spec: str) -> str:
+    cleaned = spec.split(";", 1)[0].strip()
+    cleaned = re.split(r"[<>=!~ ]", cleaned, maxsplit=1)[0]
+    cleaned = cleaned.split("[", 1)[0]
+    return cleaned.lower()
+
+
+def _collect_dependency_names(pyproject_data: dict) -> set[str]:
+    names: set[str] = set()
+    project = pyproject_data.get("project", {})
+    for dep in project.get("dependencies", []):
+        names.add(_dep_base_name(dep))
+    groups = pyproject_data.get("dependency-groups", {})
+    for entries in groups.values():
+        for dep in entries:
+            names.add(_dep_base_name(dep))
+    return names
+
+
+def _confirm_or_edit(label: str, detected: str | None, default_fallback: str) -> str:
+    if detected:
+        use_detected = _ask(
+            Q.confirm(
+                f"Detected {label}: {detected}. Use this?",
+                default=True,
+            )
+        )
+        if use_detected:
+            return detected
+    return _ask(Q.text(f"Enter {label}:", default=detected or default_fallback))
+
+
+def _write_file(path: Path, content: str, allow_overwrite: bool = True) -> bool:
+    if path.exists() and not allow_overwrite:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def _ensure_docs_index(project_display_name: str) -> None:
+    index_path = Path("docs/index.md")
+    if index_path.exists():
+        console.print("[green]OK[/] docs/index.md already exists")
+        return
+
+    create = _ask(Q.confirm("docs/index.md is missing. Create it now?", default=True))
+    if not create:
+        console.print("[yellow]Skipped[/] docs/index.md creation")
+        return
+
+    default_content = _render_template(
+        "index.md",
+        {"project_display_name": project_display_name},
+    )
+    _write_file(index_path, default_content)
+    console.print("[green]Created[/] docs/index.md")
+
+
+def _ensure_zensical_toml() -> None:
+    pyproject_data = _read_toml(Path("pyproject.toml"))
+    project_name = pyproject_data.get("project", {}).get("name")
+
+    ok, git_remote = _run(["git", "config", "--get", "remote.origin.url"])
+    repo_url_guess = _normalize_repo_url(git_remote) if ok else None
+    repo_name_guess, site_url_guess = (
+        _github_site_url(repo_url_guess) if repo_url_guess else (None, None)
+    )
+
+    repo_name_default = repo_name_guess or Path.cwd().name
+    site_name = _confirm_or_edit("site name", project_name, Path.cwd().name)
+    repo_url = _confirm_or_edit(
+        "repository URL",
+        repo_url_guess,
+        f"https://github.com/ORG/{repo_name_default}",
+    )
+    repo_name = _confirm_or_edit("repository name", repo_name_guess, repo_name_default)
+    site_url = _confirm_or_edit(
+        "site URL",
+        site_url_guess,
+        f"https://ORG.github.io/{repo_name}",
+    )
+
+    python_path_default = "src" if Path("src").exists() else "."
+    python_path = _ask(
+        Q.text(
+            "Path to Python package root for mkdocstrings:",
+            default=python_path_default,
+        )
+    )
+
+    content = _render_template(
+        "zensical.toml",
+        {
+            "site_name": site_name,
+            "site_url": site_url,
+            "repo_url": repo_url,
+            "repo_name": repo_name,
+            "python_path": python_path,
+        },
+    )
+
+    target = Path("zensical.toml")
+    if target.exists():
+        overwrite = _ask(
+            Q.confirm(
+                "zensical.toml exists. Overwrite with updated config?",
+                default=False,
+            )
+        )
+        if not overwrite:
+            console.print("[yellow]Skipped[/] zensical.toml")
+            return
+
+    _write_file(target, content)
+    console.print("[green]Wrote[/] zensical.toml")
+
+
+def _ensure_docs_workflow() -> None:
+    workflow_path = Path(".github/workflows/docs.yaml")
+    if workflow_path.exists():
+        overwrite = _ask(
+            Q.confirm(
+                ".github/workflows/docs.yaml exists. Replace it with zensical workflow?",
+                default=False,
+            )
+        )
+        if not overwrite:
+            console.print("[yellow]Skipped[/] docs workflow update")
+            return
+
+    _write_file(workflow_path, _load_template("docs.yaml"))
+    console.print("[green]Wrote[/] .github/workflows/docs.yaml")
+
+
+def _cleanup_mkdocs_files() -> None:
+    mkdocs_yaml = Path("mkdocs.yaml")
+    if mkdocs_yaml.exists() and _ask(Q.confirm("Remove mkdocs.yaml?", default=True)):
+        mkdocs_yaml.unlink()
+        console.print("[green]Removed[/] mkdocs.yaml")
+
+    docs_js = Path("docs/javascript")
+    if docs_js.exists() and _ask(
+        Q.confirm("Delete docs/javascript directory?", default=False)
+    ):
+        for entry in sorted(docs_js.rglob("*"), reverse=True):
+            if entry.is_file():
+                entry.unlink()
+            elif entry.is_dir():
+                entry.rmdir()
+        docs_js.rmdir()
+        console.print("[green]Removed[/] docs/javascript")
+
+
+def _ensure_api_stub(package_name: str) -> None:
+    api_md = Path("docs/api.md")
+    if api_md.exists():
+        return
+    if not _ask(
+        Q.confirm("docs/api.md is missing. Create API reference page?", default=True)
+    ):
+        return
+    _write_file(
+        api_md,
+        _render_template("api.md", {"package_name": package_name}),
+    )
+    console.print("[green]Created[/] docs/api.md")
+
+
+def _update_gitignore() -> None:
+    gitignore_path = Path(".gitignore")
+    lines: list[str] = []
+    if gitignore_path.exists():
+        lines = gitignore_path.read_text(encoding="utf-8").splitlines()
+
+    docs_ignore_patterns = {"docs", "docs/", "/docs", "/docs/"}
+    filtered = [line for line in lines if line.strip() not in docs_ignore_patterns]
+    if len(filtered) != len(lines):
+        if _ask(
+            Q.confirm(
+                "Found docs ignore rules in .gitignore. Remove them?", default=True
+            )
+        ):
+            lines = filtered
+            console.print("[green]Updated[/] removed docs ignore rules")
+
+    has_site = any(
+        line.strip() in {"site", "site/", "/site", "/site/"} for line in lines
+    )
+    if not has_site:
+        if lines and lines[-1].strip() != "":
+            lines.append("")
+        lines.append("site/")
+        console.print("[green]Updated[/] added site/ to .gitignore")
+
+    gitignore_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _run_dependency_updates(pyproject_data: dict) -> str:
+    names = _collect_dependency_names(pyproject_data)
+    group = _ask(
+        Q.text(
+            "Dependency group for docs packages (leave blank for default group):",
+            default="docs",
+        )
+    ).strip()
+    group_args = ["--group", group] if group else []
+
+    legacy = sorted({"mkdocs", "mkdocs-material"} & names)
+    if legacy:
+        if _ask(
+            Q.confirm(
+                f"Detected legacy docs dependencies ({', '.join(legacy)}). Remove them?",
+                default=True,
+            )
+        ):
+            ok, out = _run(["uv", "remove", *group_args, *legacy])
+            console.print(
+                "[green]Done[/] uv remove ..." if ok else f"[red]Failed[/] {out}"
+            )
+
+    missing = [
+        dep
+        for dep in ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
+        if dep not in names
+    ]
+    if missing and _ask(
+        Q.confirm(
+            f"Add missing docs dependencies: {', '.join(missing)}?",
+            default=True,
+        )
+    ):
+        ok, out = _run(["uv", "add", *group_args, *missing])
+        console.print("[green]Done[/] uv add ..." if ok else f"[red]Failed[/] {out}")
+
+    return group
+
+
+def _detect_package_name() -> str:
+    pyproject_data = _read_toml(Path("pyproject.toml"))
+    project_name = pyproject_data.get("project", {}).get("name", "")
+    normalized = project_name.replace("-", "_") if project_name else ""
+
+    src_dir = Path("src")
+    if normalized and (src_dir / normalized / "__init__.py").exists():
+        guess = normalized
+    elif normalized:
+        guess = normalized
+    else:
+        guess = Path.cwd().name.replace("-", "_")
+
+    return _confirm_or_edit("Python package name", guess, guess)
+
+
+def _validate_build(dependency_group: str | None = None) -> None:
+    if not _ask(
+        Q.confirm(
+            "Run 'uv run zensical build --strict' to validate setup?", default=True
+        )
+    ):
+        return
+
+    command = ["uv", "run"]
+
+    if dependency_group is not None:
+        command += ["--group", dependency_group]
+
+    command += ["zensical", "build", "--strict"]
+    ok, out = _run(command)
+
+    if ok:
+        console.print("[green]Build succeeded[/]")
+    else:
+        console.print(f"[red]Build failed[/] {out}")
+
+
+def _run_cli() -> None:
+    console.print(
+        Panel.fit(
+            "Interactive setup for Zensical docs in a new or existing repository.",
+            title="cfadoc setup",
+            border_style="cyan",
+        )
+    )
+
+    if not Path(".").resolve().joinpath(".git").exists():
+        proceed = _ask(
+            Q.confirm(
+                "No .git directory detected in current folder. Continue anyway?",
+                default=True,
+            )
+        )
+        if not proceed:
+            console.print("[yellow]Cancelled[/]")
+            return
+
+    package_name = _detect_package_name()
+    pyproject_data = _read_toml(Path("pyproject.toml"))
+    dep_names = _collect_dependency_names(pyproject_data)
+    has_mkdocs_yaml = Path("mkdocs.yaml").exists()
+    has_docs_js = Path("docs/javascript").exists()
+    legacy_deps = sorted({"mkdocs", "mkdocs-material"} & dep_names)
+
+    if has_mkdocs_yaml or has_docs_js or legacy_deps:
+        detected: list[str] = []
+        if has_mkdocs_yaml:
+            detected.append("mkdocs.yaml")
+        if has_docs_js:
+            detected.append("docs/javascript")
+        if legacy_deps:
+            detected.append(f"legacy deps: {', '.join(legacy_deps)}")
+        console.print(
+            f"[cyan]Detected legacy mkdocs setup:[/] {'; '.join(detected)}. "
+            "Will offer migration cleanups where relevant."
+        )
+    else:
+        console.print(
+            "[cyan]No mkdocs markers detected; continuing with standard setup.[/]"
+        )
+
+    _ensure_docs_index(project_display_name=package_name)
+    _ensure_api_stub(package_name)
+    _ensure_zensical_toml()
+    _ensure_docs_workflow()
+    _update_gitignore()
+
+    _cleanup_mkdocs_files()
+    dependency_group = _run_dependency_updates(pyproject_data)
+
+    _validate_build(dependency_group)
+    console.print("\n[bold green]Setup complete.[/bold green]")
+
+    console.print("\n[bold]Manual follow-ups:[/bold]")
+    console.print("- In GitHub repo settings, set Pages source to GitHub Actions")
+    console.print("- Update README notes if you are migrating from mkdocs")
+
+
+def cli() -> None:
+    """Run the CLI"""
+    try:
+        _run_cli()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled by user.[/yellow]")
