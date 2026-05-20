@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import tomllib
@@ -210,23 +209,18 @@ def _ensure_zensical_toml() -> None:
         )
     )
 
-    # if mkdocs.yaml exists, copy nav from that
+    # if mkdocs.yaml exists, suggest copying nav from that
     if mkdocs_yaml := _find_mkdocs_yaml():
         with open(mkdocs_yaml) as f:
             content = yaml.load(f, Loader=yaml.BaseLoader)
 
-        assert "nav" in content
-        nav_paths = content["nav"]
-    # otherwise, list the files in docs/
+        if "nav" in content:
+            print("mkdocs nav list found. Consider migrating this list manually:")
+            print(content["nav"])
     else:
-        # remove the docs/ prefix
         nav_paths = [Path(*p.parts[1:]) for p in Path("docs").glob("*.md")]
-        # ensure that index.md comes first
-        first = Path("index.md")
-        assert first in nav_paths
-        nav_paths.insert(0, nav_paths.pop(nav_paths.index(first)))
-
-    nav = json.dumps(nav_paths)
+        print("Consider adding paths to nav:")
+        print(nav_paths)
 
     content = _render_template(
         "zensical.toml",
@@ -236,7 +230,6 @@ def _ensure_zensical_toml() -> None:
             "repo_url": repo_url,
             "repo_name": repo_name,
             "python_path": python_path,
-            "nav": nav,
         },
     )
 
