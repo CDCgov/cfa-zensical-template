@@ -147,7 +147,7 @@ def _dependency_specs_by_location(
 
 
 def _confirm_or_edit(label: str, detected: str | None, default_fallback: str) -> str:
-    return _ask(Q.text(f"Enter {label}:", default=detected or default_fallback))
+    return _ask(Q.text(f"{label}:", default=detected or default_fallback))
 
 
 def _write_file(path: Path, content: str, allow_overwrite: bool = True) -> bool:
@@ -188,15 +188,15 @@ def _ensure_zensical_toml() -> None:
     )
 
     repo_name_default = repo_name_guess or Path.cwd().name
-    site_name = _confirm_or_edit("site name", project_name, Path.cwd().name)
+    site_name = _confirm_or_edit("Site name", project_name, Path.cwd().name)
     repo_url = _confirm_or_edit(
-        "repository URL",
+        "Repo URL",
         repo_url_guess,
         f"https://github.com/ORG/{repo_name_default}",
     )
-    repo_name = _confirm_or_edit("repository name", repo_name_guess, repo_name_default)
+    repo_name = _confirm_or_edit("Repo name", repo_name_guess, repo_name_default)
     site_url = _confirm_or_edit(
-        "site URL",
+        "Site URL",
         site_url_guess,
         f"https://ORG.github.io/{repo_name}",
     )
@@ -215,12 +215,13 @@ def _ensure_zensical_toml() -> None:
             content = yaml.load(f, Loader=yaml.BaseLoader)
 
         if "nav" in content:
-            print("mkdocs nav list found. Consider migrating this list manually:")
-            print(content["nav"])
+            print(
+                "mkdocs nav list found. Consider migrating this list manually:",
+                content["nav"],
+            )
     else:
-        nav_paths = [Path(*p.parts[1:]) for p in Path("docs").glob("*.md")]
-        print("Consider adding paths to nav:")
-        print(nav_paths)
+        nav_paths = [str(Path(*p.parts[1:])) for p in Path("docs").glob("*.md")]
+        print("Consider adding paths to nav:", nav_paths)
 
     content = _render_template(
         "zensical.toml",
@@ -398,9 +399,7 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
         Q.text(
             "Dependency group for docs packages:",
             default="docs",
-            validate=lambda value: (
-                True if value.strip() else "Please enter a dependency group name."
-            ),
+            validate=lambda value: len(value.strip()) > 0,
         )
     ).strip()
     group_args = ["--group", group]
@@ -496,7 +495,7 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
     if missing:
         selected = _ask(
             Q.checkbox(
-                "Select docs dependencies to add (space to toggle, enter to confirm):",
+                "Select docs dependencies to add:",
                 choices=[
                     Q.Choice(dep, checked=True)
                     for dep in [
