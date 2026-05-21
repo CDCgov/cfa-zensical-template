@@ -147,7 +147,7 @@ def _dependency_specs_by_location(
 
 
 def _confirm_or_edit(label: str, detected: str | None, default_fallback: str) -> str:
-    return _ask(Q.text(f"Enter {label}:", default=detected or default_fallback))
+    return _ask(Q.text(f"{label}:", default=detected or default_fallback))
 
 
 def _write_file(path: Path, content: str, allow_overwrite: bool = True) -> bool:
@@ -217,7 +217,7 @@ def _ensure_zensical_toml() -> None:
         if "nav" in content:
             print(
                 "mkdocs nav list found. Consider migrating this list manually:",
-                content["nav"]
+                content["nav"],
             )
     else:
         nav_paths = [str(Path(*p.parts[1:])) for p in Path("docs").glob("*.md")]
@@ -399,9 +399,7 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
         Q.text(
             "Dependency group for docs packages:",
             default="docs",
-            validate=lambda value: (
-                True if value.strip() else "Please enter a dependency group name."
-            ),
+            validate=lambda value: len(value.strip()) > 0,
         )
     ).strip()
     group_args = ["--group", group]
