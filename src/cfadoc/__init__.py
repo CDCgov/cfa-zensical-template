@@ -188,15 +188,15 @@ def _ensure_zensical_toml() -> None:
     )
 
     repo_name_default = repo_name_guess or Path.cwd().name
-    site_name = _confirm_or_edit("site name", project_name, Path.cwd().name)
+    site_name = _confirm_or_edit("Site name", project_name, Path.cwd().name)
     repo_url = _confirm_or_edit(
-        "repository URL",
+        "Repo URL",
         repo_url_guess,
         f"https://github.com/ORG/{repo_name_default}",
     )
-    repo_name = _confirm_or_edit("repository name", repo_name_guess, repo_name_default)
+    repo_name = _confirm_or_edit("Repo name", repo_name_guess, repo_name_default)
     site_url = _confirm_or_edit(
-        "site URL",
+        "Site URL",
         site_url_guess,
         f"https://ORG.github.io/{repo_name}",
     )
@@ -495,7 +495,7 @@ def _run_dependency_updates(pyproject_data: dict) -> str:
     if missing:
         selected = _ask(
             Q.checkbox(
-                "Select docs dependencies to add (space to toggle, enter to confirm):",
+                "Select docs dependencies to add:",
                 choices=[
                     Q.Choice(dep, checked=True)
                     for dep in [
