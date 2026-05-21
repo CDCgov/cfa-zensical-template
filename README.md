@@ -12,7 +12,7 @@ See the [GitHub Pages](https://cdcgov.github.io/cfa-mkdocs-template/), built usi
 ## Getting started
 
 - Enter the top level of the repo you want to work in
-- `uvx run --from git+https://github.com/CDCgov/cfa-zensical-template cfadoc`
+- `uvx --from git+https://github.com/CDCgov/cfa-zensical-template cfadoc`
 
 ## Project Admin
 

@@ -215,12 +215,13 @@ def _ensure_zensical_toml() -> None:
             content = yaml.load(f, Loader=yaml.BaseLoader)
 
         if "nav" in content:
-            print("mkdocs nav list found. Consider migrating this list manually:")
-            print(content["nav"])
+            print(
+                "mkdocs nav list found. Consider migrating this list manually:",
+                content["nav"]
+            )
     else:
-        nav_paths = [Path(*p.parts[1:]) for p in Path("docs").glob("*.md")]
-        print("Consider adding paths to nav:")
-        print(nav_paths)
+        nav_paths = [str(Path(*p.parts[1:])) for p in Path("docs").glob("*.md")]
+        print("Consider adding paths to nav:", nav_paths)
 
     content = _render_template(
         "zensical.toml",
