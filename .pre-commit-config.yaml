@@ -5,6 +5,8 @@ repos:
       - id: check-added-large-files
       - id: check-yaml
       - id: check-toml
+        # templated file does not meet normal syntax
+        exclude: src/cfadoc/templates/zensical.toml
       - id: end-of-file-fixer
       - id: mixed-line-ending
       - id: trailing-whitespace
