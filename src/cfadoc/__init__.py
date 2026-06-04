@@ -116,7 +116,7 @@ class CLI:
 
     @classmethod
     def _get_remote_url(cls) -> str | None:
-        remote = cls._run(["git", "config", "--get", "remote.origin.url"])
+        remote = _run(["git", "config", "--get", "remote.origin.url"])
 
         if remote is None:
             return None
