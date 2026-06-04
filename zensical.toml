@@ -4,7 +4,7 @@ site_url = "https://cdcgov.github.io/cfa-zensical-template"
 repo_url = "https://github.com/cdcgov/cfa-zensical-template"
 repo_name = "cfa-zensical-template"
 
-nav = ["index.md", "migrating_from_mkdocs.md", "api.md"]
+nav = ["index.md", "api.md"]
 
 [project.theme]
 language = "en"

@@ -64,12 +64,18 @@ class CLI:
     docs_dep_names = ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
     default_repo_owner = "cdcent"
 
-    def __init__(self, console=Console()):
-        self.console = console
+    def __init__(self):
+        """
+        An interactive CLI
+        """
+        self.console = Console()
         self.template_data = {}
         self.post_msgs = []
 
     def msg(self, *args):
+        """
+        Send a message to the console
+        """
         self.console.print(*args)
 
     def _text(self, msg: str, default: str | None) -> Any:
@@ -416,6 +422,7 @@ class CLI:
         return [Action("validate build", lambda: _run(command))]
 
     def run(self) -> None:
+        """Run the CLI"""
         self.msg(
             Panel.fit(
                 "Set up Zensical docs in a new or existing repository",
@@ -475,5 +482,5 @@ class CLI:
 
 
 def cli():
-    """Run the CLI"""
+    """Instantiate a CLI object and run it"""
     CLI().run()
