@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import abc
 import dataclasses
 import json
 import re
@@ -163,9 +162,7 @@ class CLI:
 
         action = Action(
             description=f"write {str(target)}",
-            fun=lambda: self._write_file_from_template(
-                path=target, template_name="index.md"
-            ),
+            fun=lambda: self._write_file_from_template(name="index.md", path=target),
         )
 
         return [action]
@@ -212,24 +209,24 @@ class CLI:
                 content = yaml.load(f, Loader=yaml.BaseLoader)
 
             assert "nav" in content
-            self.template_values["nav"] = json.dumps(content["nav"])
+            self.template_data["nav"] = json.dumps(content["nav"])
             self.msg(f"Copying nav from {str(mkdocs_yaml)}")
         else:
             nav_paths = [str(Path(*p.parts[1:])) for p in Path("docs").glob("*.md")]
-            self.template_values["nav"] = json.dumps(nav_paths)
+            self.template_data["nav"] = json.dumps(nav_paths)
             self.msg("Listing all docs/*.md in nav:", nav_paths)
 
         package_name = self._detect_package_name()
-        self.template_values["project_name"] = package_name
-        self.template_values["site_name"] = package_name
-        self.template_values["site_url"] = site_url
-        self.template_values["repo_url"] = repo_url
-        self.template_values["python_path"] = python_path
+        self.template_data["project_name"] = package_name
+        self.template_data["site_name"] = package_name
+        self.template_data["site_url"] = site_url
+        self.template_data["repo_url"] = repo_url
+        self.template_data["python_path"] = python_path
 
         action = Action(
             description=f"create {str(target)}",
             fun=lambda: self._write_file_from_template(
-                path=target, template_name="zensical.toml"
+                name="zensical.toml", path=target
             ),
         )
 
@@ -243,9 +240,7 @@ class CLI:
 
         action = Action(
             description=f"write {str(path)}",
-            fun=lambda: self._write_file_from_template(
-                path=path, template_name="docs.yaml"
-            ),
+            fun=lambda: self._write_file_from_template(name="docs.yaml", path=path),
         )
 
         return [action]
@@ -302,9 +297,7 @@ class CLI:
 
         action = Action(
             description=f"write {str(path)}",
-            fun=lambda: self._write_file_from_template(
-                path=path, template_name="docs.yaml"
-            ),
+            fun=lambda: self._write_file_from_template(name="api.md", path=path),
         )
 
         return [action]
@@ -389,7 +382,7 @@ class CLI:
         if dep.group is not None:
             command += ["--group", dep.group]
         command.append(dep.name)
-        cls._run(command)
+        _run(command)
 
     @classmethod
     def _add_dependency(cls, dep: Dependency):
@@ -397,7 +390,7 @@ class CLI:
         if dep.group is not None:
             command += ["--group", dep.group]
         command.append(dep.name)
-        cls._run(command)
+        _run(command)
 
     @classmethod
     def _detect_package_name(cls) -> str:
@@ -420,7 +413,7 @@ class CLI:
 
         command += ["zensical", "build"]
 
-        return [Action("validate build", lambda: self._run(command))]
+        return [Action("validate build", lambda: _run(command))]
 
     def run(self) -> None:
         self.msg(
@@ -460,16 +453,16 @@ class CLI:
             "In GitHub repo settings, set Pages source to GitHub Actions"
         )
 
-        if not actions:
+        if not self.actions:
             self.msg("No actions needed")
         else:
             self.msg("\nNeeded actions:")
-            for action in actions:
+            for action in self.actions:
                 self.msg("- ", action.description)
             self.msg()
 
             if questionary.confirm("Run these actions", default=False).ask():
-                for action in actions:
+                for action in self.actions:
                     action.fun()
                     self.msg(f"[green]OK[/] {action.description}")
 
