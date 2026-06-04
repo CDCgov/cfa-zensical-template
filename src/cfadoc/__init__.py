@@ -262,6 +262,14 @@ class CLI:
 
         return [action]
 
+    def _ensure_gh_pages_from_workflow(self) -> list[Action]:
+        assert "repo_owner" in self.template_data
+        assert "repo_name" in self.template_data
+        endpoint = f"repos/{self.template_data['repo_owner']}/{self.template_data['repo_name']}/pages"
+        cmd = ["gh", "api", "--method", "PUT", endpoint, "-f", "'build_type=workflow'"]
+        action = Action("Ensure GitHub Pages from from workflow", lambda: _run(cmd))
+        return [action]
+
     def _cleanup_mkdocs_files(self) -> list[Action]:
         actions = []
         if mkdocs_yaml := self._find_mkdocs_yaml():
@@ -455,6 +463,7 @@ class CLI:
                 self._ensure_api_stub,
                 self._ensure_zensical_toml,
                 self._ensure_docs_workflow,
+                self._ensure_gh_pages_from_workflow,
                 self._update_gitignore,
                 self._cleanup_mkdocs_files,
                 self._cleanup_legacy_mkdocs_workflows,
