@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import dataclasses
 import json
 import re
@@ -42,14 +43,31 @@ class Dependency:
         return out
 
 
+def _run(command: list[str]) -> None | str:
+    try:
+        result = subprocess.run(command, check=True, text=True)
+
+        return result.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _write_file(path: Path, content: str, allow_overwrite: bool = False):
+    if path.exists() and not allow_overwrite:
+        raise RuntimeError(f"File {path} exists")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
 class CLI:
+    template_root = "cfadoc.templates"
     legacy_dep_names = ["mkdocs", "mkdocs-material", "mkdocstrings"]
     docs_dep_names = ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
     default_repo_owner = "cdcent"
 
     def __init__(self, console=Console()):
         self.console = console
-        self.template_values = {}
+        self.template_data = {}
         self.post_msgs = []
 
     def msg(self, *args):
@@ -68,39 +86,20 @@ class CLI:
             self.msg("[yellow]Cancelled[/]")
             sys.exit(0)
 
-    @staticmethod
-    def _run(command: list[str]) -> None | str:
-        try:
-            result = subprocess.run(command, check=True, text=True)
-
-            return result.stdout.strip() or None
-        except Exception:
-            return None
-
-    @staticmethod
-    def _load_template(name: str) -> str:
+    @classmethod
+    def _load_template(cls, name: str) -> str:
         return (
-            resources.files("cfadoc.templates")
+            resources.files(cls.template_root)
             .joinpath(name)
             .read_text(encoding="utf-8")
         )
 
-    @classmethod
-    def _render_template(cls, name: str, values: dict[str, str]) -> str:
-        template = cls._load_template(name)
-        return chevron.render(template, values)
-
-    def _write_file_from_template(self, path: Path, template_name: str):
-        content = self._render_template(name=template_name, values=self.template_values)
-        self._write_file(path=path, content=content)
+    def _write_file_from_template(self, name: str, path: Path):
+        template = self._load_template(name)
+        content = chevron.render(template, data=self.template_data)
+        _write_file(path=path, content=content)
 
     @staticmethod
-    def _write_file(path: Path, content: str, allow_overwrite: bool = False):
-        if path.exists() and not allow_overwrite:
-            raise RuntimeError(f"File {path} exists")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-
     @staticmethod
     def _read_toml(path: Path) -> dict:
         with path.open("rb") as handle:
@@ -427,27 +426,33 @@ class CLI:
         self.msg(
             Panel.fit(
                 "Set up Zensical docs in a new or existing repository",
-                title="cfadoc setup",
+                title="cfadoc",
                 border_style="cyan",
             )
         )
 
-        docs_group = self._text("Dependency group for docs packages", default="docs")
-        pyproject_data = self._read_toml(Path("pyproject.toml"))
-
-        actions: list[Action] = []
-
-        actions += self._ensure_index()
-        actions += self._ensure_api_stub()
-        actions += self._ensure_zensical_toml()
-        actions += self._ensure_docs_workflow()
-        actions += self._update_gitignore()
-        actions += self._cleanup_mkdocs_files()
-        actions += self._cleanup_legacy_mkdocs_workflows()
-        actions += self._run_dependency_updates(
-            pyproject_data=pyproject_data, docs_group=docs_group
+        # collect data
+        self.docs_group = self._text(
+            "Dependency group for docs packages", default="docs"
         )
-        actions += self._validate_build(docs_group=docs_group)
+        self.pyproject_data = self._read_toml(Path("pyproject.toml"))
+
+        # collect actions
+        self.actions = [
+            action
+            for fun in [
+                self._ensure_index,
+                self._ensure_api_stub,
+                self._ensure_zensical_toml,
+                self._ensure_docs_workflow,
+                self._update_gitignore,
+                self._cleanup_mkdocs_files,
+                self._cleanup_legacy_mkdocs_workflows,
+                self._run_dependency_updates,
+                self._validate_build,
+            ]
+            for action in fun()
+        ]
 
         # add a post message
         self._readme_mentions_mkdocs()
