@@ -42,14 +42,31 @@ class Dependency:
         return out
 
 
+def _run(command: list[str]) -> None | str:
+    try:
+        result = subprocess.run(command, check=True, text=True)
+
+        return result.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _write_file(path: Path, content: str, allow_overwrite: bool = False):
+    if path.exists() and not allow_overwrite:
+        raise RuntimeError(f"File {path} exists")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
 class CLI:
+    template_root = "cfadoc.templates"
     legacy_dep_names = ["mkdocs", "mkdocs-material", "mkdocstrings"]
     docs_dep_names = ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
     default_repo_owner = "cdcent"
 
     def __init__(self, console=Console()):
         self.console = console
-        self.template_values = {}
+        self.template_data = {}
         self.post_msgs = []
 
     def msg(self, *args):
@@ -68,39 +85,20 @@ class CLI:
             self.msg("[yellow]Cancelled[/]")
             sys.exit(0)
 
-    @staticmethod
-    def _run(command: list[str]) -> None | str:
-        try:
-            result = subprocess.run(command, check=True, text=True)
-
-            return result.stdout.strip() or None
-        except Exception:
-            return None
-
-    @staticmethod
-    def _load_template(name: str) -> str:
+    @classmethod
+    def _load_template(cls, name: str) -> str:
         return (
-            resources.files("cfadoc.templates")
+            resources.files(cls.template_root)
             .joinpath(name)
             .read_text(encoding="utf-8")
         )
 
-    @classmethod
-    def _render_template(cls, name: str, values: dict[str, str]) -> str:
-        template = cls._load_template(name)
-        return chevron.render(template, values)
-
-    def _write_file_from_template(self, path: Path, template_name: str):
-        content = self._render_template(name=template_name, values=self.template_values)
-        self._write_file(path=path, content=content)
+    def _write_file_from_template(self, name: str, path: Path):
+        template = self._load_template(name)
+        content = chevron.render(template, data=self.template_data)
+        _write_file(path=path, content=content)
 
     @staticmethod
-    def _write_file(path: Path, content: str, allow_overwrite: bool = False):
-        if path.exists() and not allow_overwrite:
-            raise RuntimeError(f"File {path} exists")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-
     @staticmethod
     def _read_toml(path: Path) -> dict:
         with path.open("rb") as handle:
@@ -118,7 +116,7 @@ class CLI:
 
     @classmethod
     def _get_remote_url(cls) -> str | None:
-        remote = cls._run(["git", "config", "--get", "remote.origin.url"])
+        remote = _run(["git", "config", "--get", "remote.origin.url"])
 
         if remote is None:
             return None
@@ -164,9 +162,7 @@ class CLI:
 
         action = Action(
             description=f"write {str(target)}",
-            fun=lambda: self._write_file_from_template(
-                path=target, template_name="index.md"
-            ),
+            fun=lambda: self._write_file_from_template(name="index.md", path=target),
         )
 
         return [action]
@@ -213,24 +209,24 @@ class CLI:
                 content = yaml.load(f, Loader=yaml.BaseLoader)
 
             assert "nav" in content
-            self.template_values["nav"] = json.dumps(content["nav"])
+            self.template_data["nav"] = json.dumps(content["nav"])
             self.msg(f"Copying nav from {str(mkdocs_yaml)}")
         else:
             nav_paths = [str(Path(*p.parts[1:])) for p in Path("docs").glob("*.md")]
-            self.template_values["nav"] = json.dumps(nav_paths)
+            self.template_data["nav"] = json.dumps(nav_paths)
             self.msg("Listing all docs/*.md in nav:", nav_paths)
 
         package_name = self._detect_package_name()
-        self.template_values["project_name"] = package_name
-        self.template_values["site_name"] = package_name
-        self.template_values["site_url"] = site_url
-        self.template_values["repo_url"] = repo_url
-        self.template_values["python_path"] = python_path
+        self.template_data["project_name"] = package_name
+        self.template_data["site_name"] = package_name
+        self.template_data["site_url"] = site_url
+        self.template_data["repo_url"] = repo_url
+        self.template_data["python_path"] = python_path
 
         action = Action(
             description=f"create {str(target)}",
             fun=lambda: self._write_file_from_template(
-                path=target, template_name="zensical.toml"
+                name="zensical.toml", path=target
             ),
         )
 
@@ -244,9 +240,7 @@ class CLI:
 
         action = Action(
             description=f"write {str(path)}",
-            fun=lambda: self._write_file_from_template(
-                path=path, template_name="docs.yaml"
-            ),
+            fun=lambda: self._write_file_from_template(name="docs.yaml", path=path),
         )
 
         return [action]
@@ -303,9 +297,7 @@ class CLI:
 
         action = Action(
             description=f"write {str(path)}",
-            fun=lambda: self._write_file_from_template(
-                path=path, template_name="docs.yaml"
-            ),
+            fun=lambda: self._write_file_from_template(name="api.md", path=path),
         )
 
         return [action]
@@ -390,7 +382,7 @@ class CLI:
         if dep.group is not None:
             command += ["--group", dep.group]
         command.append(dep.name)
-        cls._run(command)
+        _run(command)
 
     @classmethod
     def _add_dependency(cls, dep: Dependency):
@@ -398,7 +390,7 @@ class CLI:
         if dep.group is not None:
             command += ["--group", dep.group]
         command.append(dep.name)
-        cls._run(command)
+        _run(command)
 
     @classmethod
     def _detect_package_name(cls) -> str:
@@ -421,33 +413,39 @@ class CLI:
 
         command += ["zensical", "build"]
 
-        return [Action("validate build", lambda: self._run(command))]
+        return [Action("validate build", lambda: _run(command))]
 
     def run(self) -> None:
         self.msg(
             Panel.fit(
                 "Set up Zensical docs in a new or existing repository",
-                title="cfadoc setup",
+                title="cfadoc",
                 border_style="cyan",
             )
         )
 
-        docs_group = self._text("Dependency group for docs packages", default="docs")
-        pyproject_data = self._read_toml(Path("pyproject.toml"))
-
-        actions: list[Action] = []
-
-        actions += self._ensure_index()
-        actions += self._ensure_api_stub()
-        actions += self._ensure_zensical_toml()
-        actions += self._ensure_docs_workflow()
-        actions += self._update_gitignore()
-        actions += self._cleanup_mkdocs_files()
-        actions += self._cleanup_legacy_mkdocs_workflows()
-        actions += self._run_dependency_updates(
-            pyproject_data=pyproject_data, docs_group=docs_group
+        # collect data
+        self.docs_group = self._text(
+            "Dependency group for docs packages", default="docs"
         )
-        actions += self._validate_build(docs_group=docs_group)
+        self.pyproject_data = self._read_toml(Path("pyproject.toml"))
+
+        # collect actions
+        self.actions = [
+            action
+            for fun in [
+                self._ensure_index,
+                self._ensure_api_stub,
+                self._ensure_zensical_toml,
+                self._ensure_docs_workflow,
+                self._update_gitignore,
+                self._cleanup_mkdocs_files,
+                self._cleanup_legacy_mkdocs_workflows,
+                self._run_dependency_updates,
+                self._validate_build,
+            ]
+            for action in fun()
+        ]
 
         # add a post message
         self._readme_mentions_mkdocs()
@@ -455,16 +453,16 @@ class CLI:
             "In GitHub repo settings, set Pages source to GitHub Actions"
         )
 
-        if not actions:
+        if not self.actions:
             self.msg("No actions needed")
         else:
             self.msg("\nNeeded actions:")
-            for action in actions:
+            for action in self.actions:
                 self.msg("- ", action.description)
             self.msg()
 
             if questionary.confirm("Run these actions", default=False).ask():
-                for action in actions:
+                for action in self.actions:
                     action.fun()
                     self.msg(f"[green]OK[/] {action.description}")
 
