@@ -108,6 +108,11 @@ class CLI:
         content = chevron.render(template, data=self.template_data)
         _write_file(path=path, content=content)
 
+    def _copy_file_from_template(self, name: str, path: Path):
+        """Write a file from a 'template', without actually doing templating"""
+        content = self._load_template(name)
+        _write_file(path=path, content=content)
+
     @staticmethod
     @staticmethod
     def _read_toml(path: Path) -> dict:
@@ -242,6 +247,10 @@ class CLI:
         return [action]
 
     def _ensure_docs_workflow(self) -> list[Action]:
+        """
+        Copy workflow file. Do not perform any templating, since the workflow file
+        has mustache template markings, but those are for use by GitHub itself.
+        """
         path = self.root / ".github" / "workflows" / "docs.yaml"
         if path.exists():
             self.msg(f"[green]OK[/] {str(path)} already exists")
@@ -249,7 +258,7 @@ class CLI:
 
         action = Action(
             description=f"write {str(path)}",
-            fun=lambda: self._write_file_from_template(name="docs.yaml", path=path),
+            fun=lambda: self._copy_file_from_template(name="docs.yaml", path=path),
         )
 
         return [action]
