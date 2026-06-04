@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from cfadoc import CLI
@@ -6,9 +5,7 @@ from cfadoc import CLI
 
 def test_create_index(tmp_path):
     project_display_name = "my_project"
-
-    os.chdir(tmp_path)
-    cli = CLI()
+    cli = CLI(root=tmp_path)
     cli.template_data = {"project_display_name": project_display_name}
     actions = cli._ensure_index()
     assert len(actions) == 1

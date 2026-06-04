@@ -42,9 +42,9 @@ class Dependency:
         return out
 
 
-def _run(command: list[str]) -> None | str:
+def _run(command: list[str], cwd: None | Path = None) -> None | str:
     try:
-        result = subprocess.run(command, check=True, text=True)
+        result = subprocess.run(command, check=True, text=True, cwd=cwd)
 
         return result.stdout.strip() or None
     except Exception:
@@ -64,13 +64,17 @@ class CLI:
     docs_dep_names = ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
     default_repo_owner = "cdcent"
 
-    def __init__(self):
+    def __init__(self, root: str | Path = Path(".")):
         """
         An interactive CLI
+
+        Args:
+            root: root path of the target repo
         """
         self.console = Console()
         self.template_data = {}
         self.post_msgs = []
+        self.root = Path(root).expanduser()
 
     def msg(self, *args):
         """
@@ -120,9 +124,8 @@ class CLI:
         else:
             raise RuntimeError(f"Unknown path type: {path}")
 
-    @classmethod
-    def _get_remote_url(cls) -> str | None:
-        remote = _run(["git", "config", "--get", "remote.origin.url"])
+    def _get_remote_url(self) -> str | None:
+        remote = _run(["git", "config", "--get", "remote.origin.url"], cwd=self.root)
 
         if remote is None:
             return None
@@ -161,14 +164,14 @@ class CLI:
         return deps
 
     def _ensure_index(self) -> list[Action]:
-        target = Path("docs/index.md")
-        if target.exists():
-            self.msg(f"[green]OK[/] {str(target)} exists")
+        path = self.root / "docs" / "index.md"
+        if path.exists():
+            self.msg(f"[green]OK[/] {str(path)} exists")
             return []
 
         action = Action(
-            description=f"write {str(target)}",
-            fun=lambda: self._write_file_from_template(name="index.md", path=target),
+            description=f"write {str(path)}",
+            fun=lambda: self._write_file_from_template(name="index.md", path=path),
         )
 
         return [action]
@@ -185,9 +188,9 @@ class CLI:
             raise RuntimeError("Multiple mkdocs yaml's detected")
 
     def _ensure_zensical_toml(self) -> list[Action]:
-        target = Path("zensical.toml")
-        if target.exists():
-            self.msg(f"[green]OK[/] {str(target)} already exists")
+        path = self.root / "zensical.toml"
+        if path.exists():
+            self.msg(f"[green]OK[/] {str(path)} already exists")
             return []
 
         repo_url = self._get_remote_url()
@@ -198,7 +201,7 @@ class CLI:
             repo_owner = self._text("Repo owner", repo_owner)
         else:
             # guess name from cwd, ask for owner, construct url
-            repo_name = self._text("Repo name", Path.cwd().name)
+            repo_name = self._text("Repo name", self.root.name)
             repo_owner = self._text("Repo owner", self.default_repo_owner)
             repo_url = f"https://github.com/{repo_owner}/{repo_name}"
 
@@ -206,8 +209,8 @@ class CLI:
         self.msg(f"Using repo URL: {repo_url}")
         self.msg(f"Using site URL: {site_url}")
 
-        python_path = "src" if Path("src").exists() else "."
-        python_path = self._text("Path to Python package root", python_path)
+        python_path = "src" if (self.root / "src").exists() else self.root
+        python_path = self._text("Path to Python package root", str(python_path))
 
         # if mkdocs.yaml exists, suggest copying nav from that
         if mkdocs_yaml := self._find_mkdocs_yaml():
@@ -218,7 +221,9 @@ class CLI:
             self.template_data["nav"] = json.dumps(content["nav"])
             self.msg(f"Copying nav from {str(mkdocs_yaml)}")
         else:
-            nav_paths = [str(Path(*p.parts[1:])) for p in Path("docs").glob("*.md")]
+            nav_paths = [
+                str(Path(*p.parts[1:])) for p in (self.root / "docs").glob("*.md")
+            ]
             self.template_data["nav"] = json.dumps(nav_paths)
             self.msg("Listing all docs/*.md in nav:", nav_paths)
 
@@ -230,16 +235,14 @@ class CLI:
         self.template_data["python_path"] = python_path
 
         action = Action(
-            description=f"create {str(target)}",
-            fun=lambda: self._write_file_from_template(
-                name="zensical.toml", path=target
-            ),
+            description=f"create {str(path)}",
+            fun=lambda: self._write_file_from_template(name="zensical.toml", path=path),
         )
 
         return [action]
 
     def _ensure_docs_workflow(self) -> list[Action]:
-        path = Path(".github/workflows/docs.yaml")
+        path = self.root / ".github" / "workflows" / "docs.yaml"
         if path.exists():
             self.msg(f"[green]OK[/] {str(path)} already exists")
             return []
@@ -258,15 +261,14 @@ class CLI:
                 Action(f"remove {str(mkdocs_yaml)}", lambda: self._rm(mkdocs_yaml))
             )
 
-        docs_js = Path("docs/javascript")
+        docs_js = self.root / "docs" / "javascript"
         if docs_js.exists():
             actions.append(Action(f"remove {str(docs_js)}", lambda: self._rm(docs_js)))
 
         return actions
 
-    @staticmethod
-    def _find_legacy_mkdocs_workflows() -> list[Path]:
-        dir = Path(".github/workflows")
+    def _find_legacy_mkdocs_workflows(self) -> list[Path]:
+        dir = self.root / ".github" / "workflows"
         if not dir.exists():
             return []
 
@@ -287,7 +289,7 @@ class CLI:
         return [Action(f"remove {str(path)}", lambda: self._rm(path)) for path in paths]
 
     def _readme_mentions_mkdocs(self):
-        path = Path("README.md")
+        path = self.root / "README.md"
         if path.exists():
             content = path.read_text(encoding="utf-8")
             if "mkdocs" in content.lower():
@@ -296,7 +298,7 @@ class CLI:
                 )
 
     def _ensure_api_stub(self) -> list[Action]:
-        path = Path("docs/api.md")
+        path = self.root / "docs" / "api.md"
         if path.exists():
             self.msg(f"[green]OK[/] {str(path)} already exists")
             return []
@@ -309,7 +311,7 @@ class CLI:
         return [action]
 
     def _update_gitignore(self) -> list[Action]:
-        path = Path(".gitignore")
+        path = self.root / ".gitignore"
         if not path.exists():
             self.msg(f"[yellow]:warning[/] {str(path)} not found")
             return []
@@ -398,16 +400,16 @@ class CLI:
         command.append(dep.name)
         _run(command)
 
-    @classmethod
-    def _detect_package_name(cls) -> str:
-        pyproject_data = cls._read_toml(Path("pyproject.toml"))
+    def _detect_package_name(self) -> str:
+        pyproject_data = self._read_toml(self.root / "pyproject.toml")
         project_name = pyproject_data["project"]["name"]
         package_name = project_name.replace("-", "_")
 
-        if Path("src").exists():
-            assert (Path("src") / package_name / "__init__.py").exists()
+        src = self.root / "src"
+        if src.exists():
+            assert (src / package_name / "__init__.py").exists()
         else:
-            assert (Path(package_name) / "__init__.py").exists()
+            assert (self.root / package_name / "__init__.py").exists()
 
         return package_name
 
@@ -435,7 +437,7 @@ class CLI:
         self.docs_group = self._text(
             "Dependency group for docs packages", default="docs"
         )
-        self.pyproject_data = self._read_toml(Path("pyproject.toml"))
+        self.pyproject_data = self._read_toml(self.root / "pyproject.toml")
 
         # collect actions
         self.actions = [
