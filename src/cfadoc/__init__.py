@@ -181,9 +181,8 @@ class CLI:
 
         return [action]
 
-    @staticmethod
-    def _find_mkdocs_yaml() -> Path | None:
-        possible_paths = ["mkdocs.yaml", "mkdocs.yml"]
+    def _find_mkdocs_yaml(self) -> Path | None:
+        possible_paths = [self.root / "mkdocs.yaml", self.root / "mkdocs.yml"]
         paths = [Path(x) for x in possible_paths if Path(x).exists()]
         if len(paths) == 0:
             return None
