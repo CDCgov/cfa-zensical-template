@@ -7,7 +7,7 @@ _Formerly cfa-mkdocs-repo_
 - Auto-generating Python API documentation
 - Deploying documents to GitHub Pages
 
-See the [GitHub Pages](https://cdcgov.github.io/cfa-mkdocs-template/), built using zensical, for information on how to use this repo.
+See the [GitHub Pages](https://cdcgov.github.io/cfa-zensical-template/), built using zensical, for information on how to use this repo.
 
 ## Getting started
 
