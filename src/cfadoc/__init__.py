@@ -7,9 +7,10 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 
 import chevron
@@ -171,11 +172,11 @@ class CLI:
     def _ensure_index(self) -> list[Action]:
         path = self.root / "docs" / "index.md"
         if path.exists():
-            self.msg(f"[green]OK[/] {str(path)} exists")
+            self.msg(f"[green]OK[/] {path!s} exists")
             return []
 
         action = Action(
-            description=f"write {str(path)}",
+            description=f"write {path!s}",
             fun=lambda: self._write_file_from_template(name="index.md", path=path),
         )
 
@@ -194,27 +195,8 @@ class CLI:
     def _ensure_zensical_toml(self) -> list[Action]:
         path = self.root / "zensical.toml"
         if path.exists():
-            self.msg(f"[green]OK[/] {str(path)} already exists")
+            self.msg(f"[green]OK[/] {path!s} already exists")
             return []
-
-        repo_url = self._get_remote_url()
-        if repo_url is not None:
-            # guess owner and repo name from remote url
-            repo_owner, repo_name = self._parse_github_url(repo_url)
-            repo_name = self._text("Repo name", repo_name)
-            repo_owner = self._text("Repo owner", repo_owner)
-        else:
-            # guess name from cwd, ask for owner, construct url
-            repo_name = self._text("Repo name", self.root.name)
-            repo_owner = self._text("Repo owner", self.default_repo_owner)
-            repo_url = f"https://github.com/{repo_owner}/{repo_name}"
-
-        site_url = f"https://{repo_owner}.github.io/{repo_name}"
-        self.msg(f"Using repo URL: {repo_url}")
-        self.msg(f"Using site URL: {site_url}")
-
-        python_path = "src" if (self.root / "src").exists() else self.root
-        python_path = self._text("Path to Python package root", str(python_path))
 
         # if mkdocs.yaml exists, suggest copying nav from that
         if mkdocs_yaml := self._find_mkdocs_yaml():
@@ -223,7 +205,7 @@ class CLI:
 
             assert "nav" in content
             self.template_data["nav"] = json.dumps(content["nav"])
-            self.msg(f"Copying nav from {str(mkdocs_yaml)}")
+            self.msg(f"Copying nav from {mkdocs_yaml!s}")
         else:
             nav_paths = [
                 str(Path(*p.parts[1:])) for p in (self.root / "docs").glob("*.md")
@@ -231,15 +213,8 @@ class CLI:
             self.template_data["nav"] = json.dumps(nav_paths)
             self.msg("Listing all docs/*.md in nav:", nav_paths)
 
-        package_name = self._detect_package_name()
-        self.template_data["project_name"] = package_name
-        self.template_data["site_name"] = package_name
-        self.template_data["site_url"] = site_url
-        self.template_data["repo_url"] = repo_url
-        self.template_data["python_path"] = python_path
-
         action = Action(
-            description=f"create {str(path)}",
+            description=f"create {path!s}",
             fun=lambda: self._write_file_from_template(name="zensical.toml", path=path),
         )
 
@@ -252,11 +227,11 @@ class CLI:
         """
         path = self.root / ".github" / "workflows" / "docs.yaml"
         if path.exists():
-            self.msg(f"[green]OK[/] {str(path)} already exists")
+            self.msg(f"[green]OK[/] {path!s} already exists")
             return []
 
         action = Action(
-            description=f"write {str(path)}",
+            description=f"write {path!s}",
             fun=lambda: self._copy_file_from_template(name="docs.yaml", path=path),
         )
 
@@ -274,12 +249,12 @@ class CLI:
         actions = []
         if mkdocs_yaml := self._find_mkdocs_yaml():
             actions.append(
-                Action(f"remove {str(mkdocs_yaml)}", lambda: self._rm(mkdocs_yaml))
+                Action(f"remove {mkdocs_yaml!s}", lambda: self._rm(mkdocs_yaml))
             )
 
         docs_js = self.root / "docs" / "javascript"
         if docs_js.exists():
-            actions.append(Action(f"remove {str(docs_js)}", lambda: self._rm(docs_js)))
+            actions.append(Action(f"remove {docs_js!s}", lambda: self._rm(docs_js)))
 
         return actions
 
@@ -302,25 +277,23 @@ class CLI:
 
     def _cleanup_legacy_mkdocs_workflows(self) -> list[Action]:
         paths = self._find_legacy_mkdocs_workflows()
-        return [Action(f"remove {str(path)}", lambda: self._rm(path)) for path in paths]
+        return [Action(f"remove {path!s}", lambda: self._rm(path)) for path in paths]
 
     def _readme_mentions_mkdocs(self):
         path = self.root / "README.md"
         if path.exists():
             content = path.read_text(encoding="utf-8")
             if "mkdocs" in content.lower():
-                self.post_msgs.append(
-                    f"{str(path)} contains 'mkdocs'; consider revising"
-                )
+                self.post_msgs.append(f"{path!s} contains 'mkdocs'; consider revising")
 
     def _ensure_api_stub(self) -> list[Action]:
         path = self.root / "docs" / "api.md"
         if path.exists():
-            self.msg(f"[green]OK[/] {str(path)} already exists")
+            self.msg(f"[green]OK[/] {path!s} already exists")
             return []
 
         action = Action(
-            description=f"write {str(path)}",
+            description=f"write {path!s}",
             fun=lambda: self._write_file_from_template(name="api.md", path=path),
         )
 
@@ -329,7 +302,7 @@ class CLI:
     def _update_gitignore(self) -> list[Action]:
         path = self.root / ".gitignore"
         if not path.exists():
-            self.msg(f"[yellow]:warning[/] {str(path)} not found")
+            self.msg(f"[yellow]:warning[/] {path!s} not found")
             return []
 
         flag = False
@@ -350,21 +323,19 @@ class CLI:
             lines.append("site/")
 
         if not flag:
-            self.msg(f"[green]OK[/] {str(path)} is compliant")
+            self.msg(f"[green]OK[/] {path!s} is compliant")
             return []
 
         action = Action(
-            f"update {str(path)}", lambda: path.write_text("\n".join(lines) + "\n")
+            f"update {path!s}", lambda: path.write_text("\n".join(lines) + "\n")
         )
 
         return [action]
 
-    def _run_dependency_updates(
-        self, pyproject_data: dict, docs_group: str
-    ) -> list[Action]:
+    def _run_dependency_updates(self) -> list[Action]:
         actions = []
 
-        deps = self._get_dependencies(pyproject_data)
+        deps = self._get_dependencies(self.pyproject_data)
 
         # look for legacy dependencies
         for dep in deps:
@@ -378,7 +349,7 @@ class CLI:
 
         # check if doc dependencies are in the wrong group
         for dep in deps:
-            if dep.name in self.docs_dep_names and dep.group != docs_group:
+            if dep.name in self.docs_dep_names and dep.group != self.docs_group:
                 actions.append(
                     Action(
                         f"remove dependency '{dep.name}' from group '{dep.group}'",
@@ -388,13 +359,15 @@ class CLI:
 
         # add docs to the correct group, if they don't exist
         for name in self.docs_dep_names:
-            target_dep = Dependency(name, docs_group)
+            target_dep = Dependency(name, self.docs_group)
             if target_dep in deps:
-                self.msg(f"[green]OK[/] dependency '{name}' is in group '{docs_group}'")
+                self.msg(
+                    f"[green]OK[/] dependency '{name}' is in group '{self.docs_group}'"
+                )
             else:
                 actions.append(
                     Action(
-                        f"add dependency '{name}' to group '{docs_group}'",
+                        f"add dependency '{name}' to group '{self.docs_group}'",
                         lambda: self._add_dependency(target_dep),
                     )
                 )
@@ -429,11 +402,11 @@ class CLI:
 
         return package_name
 
-    def _validate_build(self, docs_group: str | None) -> list[Action]:
+    def _validate_build(self) -> list[Action]:
         command = ["uv", "run"]
 
-        if docs_group is not None:
-            command += ["--group", docs_group]
+        if self.docs_group is not None:
+            command += ["--group", self.docs_group]
 
         command += ["zensical", "build"]
 
@@ -450,6 +423,34 @@ class CLI:
         )
 
         # collect data
+        repo_url = self._get_remote_url()
+        if repo_url is not None:
+            # guess owner and repo name from remote url
+            repo_owner, repo_name = self._parse_github_url(repo_url)
+            repo_name = self._text("Repo name", repo_name)
+            repo_owner = self._text("Repo owner", repo_owner)
+        else:
+            # guess name from cwd, ask for owner, construct url
+            repo_name = self._text("Repo name", self.root.name)
+            repo_owner = self._text("Repo owner", self.default_repo_owner)
+            repo_url = f"https://github.com/{repo_owner}/{repo_name}"
+
+        site_url = f"https://{repo_owner}.github.io/{repo_name}"
+        self.msg(f"Using repo URL: {repo_url}")
+        self.msg(f"Using site URL: {site_url}")
+
+        python_path = "src" if (self.root / "src").exists() else self.root
+        python_path = self._text("Path to Python package root", str(python_path))
+
+        package_name = self._detect_package_name()
+        self.template_data["project_name"] = package_name
+        self.template_data["repo_owner"] = repo_owner
+        self.template_data["repo_name"] = repo_name
+        self.template_data["site_name"] = package_name
+        self.template_data["site_url"] = site_url
+        self.template_data["repo_url"] = repo_url
+        self.template_data["python_path"] = python_path
+
         self.docs_group = self._text(
             "Dependency group for docs packages", default="docs"
         )
