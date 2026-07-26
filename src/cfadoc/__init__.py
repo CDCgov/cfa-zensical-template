@@ -7,22 +7,34 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from importlib import resources
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 
-import chevron
-import questionary
+import inquirer
 import yaml
-from rich.console import Console
-from rich.panel import Panel
+
+import cfadoc.resources
 
 
 @dataclasses.dataclass
 class Action:
     description: str
     fun: Callable[[], Any]
+
+
+class CopyFileAction(Action):
+    path_names: list[str]
+
+    @property
+    def description(self) -> str:
+        return f"write {self.path!s}"
+
+    def fun(self):
+        content = cfadoc.resources.get(self.path_names)
+        with open(self.path, "w") as f:
+            f.write(content)
 
 
 @dataclasses.dataclass
@@ -59,9 +71,8 @@ def _write_file(path: Path, content: str, allow_overwrite: bool = False):
 
 
 class CLI:
-    template_root = "cfadoc.templates"
-    legacy_dep_names = ["mkdocs", "mkdocs-material", "mkdocstrings"]
-    docs_dep_names = ["zensical", "mdx-truly-sane-lists", "mkdocstrings-python"]
+    legacy_dep_names = ("mkdocs", "mkdocs-material", "mkdocstrings")
+    docs_dep_names = ("zensical", "mdx-truly-sane-lists", "mkdocstrings-python")
     default_repo_owner = "cdcent"
 
     def __init__(self, root: str | Path = Path(".")):
@@ -71,49 +82,34 @@ class CLI:
         Args:
             root: root path of the target repo
         """
-        self.console = Console()
-        self.template_data = {}
+        self.data = {}
         self.post_msgs = []
         self.root = Path(root).expanduser()
 
-    def msg(self, *args):
+    def msg(self, *args, **kwargs):
         """
         Send a message to the console
         """
-        self.console.print(*args)
+        print(*args, **kwargs)
 
     def _text(self, msg: str, default: str | None) -> Any:
         try:
-            return (
-                questionary.text(
-                    f"{msg}:", default=default or "", validate=lambda x: len(x) > 0
-                )
-                .unsafe_ask()
-                .strip()
-            )
+            return inquirer.text(
+                f"{msg}:", default=default, validate=lambda x: len(x) > 0
+            ).strip()
         except KeyboardInterrupt:
-            self.msg("[yellow]Cancelled[/]")
+            self.msg("Cancelled")
             sys.exit(0)
 
-    @classmethod
-    def _load_template(cls, name: str) -> str:
-        return (
-            resources.files(cls.template_root)
-            .joinpath(name)
-            .read_text(encoding="utf-8")
-        )
-
-    def _write_file_from_template(self, name: str, path: Path):
-        template = self._load_template(name)
-        content = chevron.render(template, data=self.template_data)
+    def _write_file_from_template(self, path_names: list[str], path: Path):
+        content = cfadoc.resources.template(path_names, data=self.template_data)
         _write_file(path=path, content=content)
 
-    def _copy_file_from_template(self, name: str, path: Path):
+    def _copy_file_from_template(self, path_names: list[str], path: Path):
         """Write a file from a 'template', without actually doing templating"""
-        content = self._load_template(name)
+        content = cfadoc.resources.get(path_names)
         _write_file(path=path, content=content)
 
-    @staticmethod
     @staticmethod
     def _read_toml(path: Path) -> dict:
         with path.open("rb") as handle:
@@ -171,15 +167,15 @@ class CLI:
     def _ensure_index(self) -> list[Action]:
         path = self.root / "docs" / "index.md"
         if path.exists():
-            self.msg(f"[green]OK[/] {str(path)} exists")
+            self.msg(f"[green]OK[/] {path!s} exists")
             return []
 
         action = Action(
-            description=f"write {str(path)}",
+            description=f"write {path!s}",
             fun=lambda: self._write_file_from_template(name="index.md", path=path),
         )
 
-        return [action]
+        return [CopyFileAction(path_names=["docs", "index.md"])]
 
     def _find_mkdocs_yaml(self) -> Path | None:
         possible_paths = [self.root / "mkdocs.yaml", self.root / "mkdocs.yml"]
@@ -194,7 +190,7 @@ class CLI:
     def _ensure_zensical_toml(self) -> list[Action]:
         path = self.root / "zensical.toml"
         if path.exists():
-            self.msg(f"[green]OK[/] {str(path)} already exists")
+            self.msg(f"[green]OK[/] {path!s} already exists")
             return []
 
         repo_url = self._get_remote_url()
@@ -223,7 +219,7 @@ class CLI:
 
             assert "nav" in content
             self.template_data["nav"] = json.dumps(content["nav"])
-            self.msg(f"Copying nav from {str(mkdocs_yaml)}")
+            self.msg(f"Copying nav from {mkdocs_yaml!s}")
         else:
             nav_paths = [
                 str(Path(*p.parts[1:])) for p in (self.root / "docs").glob("*.md")
@@ -239,7 +235,7 @@ class CLI:
         self.template_data["python_path"] = python_path
 
         action = Action(
-            description=f"create {str(path)}",
+            description=f"create {path!s}",
             fun=lambda: self._write_file_from_template(name="zensical.toml", path=path),
         )
 
@@ -252,11 +248,11 @@ class CLI:
         """
         path = self.root / ".github" / "workflows" / "docs.yaml"
         if path.exists():
-            self.msg(f"[green]OK[/] {str(path)} already exists")
+            self.msg(f"[green]OK[/] {path!s} already exists")
             return []
 
         action = Action(
-            description=f"write {str(path)}",
+            description=f"write {path!s}",
             fun=lambda: self._copy_file_from_template(name="docs.yaml", path=path),
         )
 
@@ -274,12 +270,12 @@ class CLI:
         actions = []
         if mkdocs_yaml := self._find_mkdocs_yaml():
             actions.append(
-                Action(f"remove {str(mkdocs_yaml)}", lambda: self._rm(mkdocs_yaml))
+                Action(f"remove {mkdocs_yaml!s}", lambda: self._rm(mkdocs_yaml))
             )
 
         docs_js = self.root / "docs" / "javascript"
         if docs_js.exists():
-            actions.append(Action(f"remove {str(docs_js)}", lambda: self._rm(docs_js)))
+            actions.append(Action(f"remove {docs_js!s}", lambda: self._rm(docs_js)))
 
         return actions
 
@@ -302,25 +298,23 @@ class CLI:
 
     def _cleanup_legacy_mkdocs_workflows(self) -> list[Action]:
         paths = self._find_legacy_mkdocs_workflows()
-        return [Action(f"remove {str(path)}", lambda: self._rm(path)) for path in paths]
+        return [Action(f"remove {path!s}", lambda: self._rm(path)) for path in paths]
 
     def _readme_mentions_mkdocs(self):
         path = self.root / "README.md"
         if path.exists():
             content = path.read_text(encoding="utf-8")
             if "mkdocs" in content.lower():
-                self.post_msgs.append(
-                    f"{str(path)} contains 'mkdocs'; consider revising"
-                )
+                self.post_msgs.append(f"{path!s} contains 'mkdocs'; consider revising")
 
     def _ensure_api_stub(self) -> list[Action]:
         path = self.root / "docs" / "api.md"
         if path.exists():
-            self.msg(f"[green]OK[/] {str(path)} already exists")
+            self.msg(f"[green]OK[/] {path!s} already exists")
             return []
 
         action = Action(
-            description=f"write {str(path)}",
+            description=f"write {path!s}",
             fun=lambda: self._write_file_from_template(name="api.md", path=path),
         )
 
@@ -329,7 +323,7 @@ class CLI:
     def _update_gitignore(self) -> list[Action]:
         path = self.root / ".gitignore"
         if not path.exists():
-            self.msg(f"[yellow]:warning[/] {str(path)} not found")
+            self.msg(f"[yellow]:warning[/] {path!s} not found")
             return []
 
         flag = False
@@ -350,11 +344,11 @@ class CLI:
             lines.append("site/")
 
         if not flag:
-            self.msg(f"[green]OK[/] {str(path)} is compliant")
+            self.msg(f"[green]OK[/] {path!s} is compliant")
             return []
 
         action = Action(
-            f"update {str(path)}", lambda: path.write_text("\n".join(lines) + "\n")
+            f"update {path!s}", lambda: path.write_text("\n".join(lines) + "\n")
         )
 
         return [action]
@@ -442,17 +436,24 @@ class CLI:
     def run(self) -> None:
         """Run the CLI"""
         self.msg(
-            Panel.fit(
-                "Set up Zensical docs in a new or existing repository",
-                title="cfadoc",
-                border_style="cyan",
-            )
+            "*** cfadoc ***",
+            "Set up Zensical docs in a new or existing repository",
+            sep="\n",
         )
 
         # collect data
-        self.docs_group = self._text(
-            "Dependency group for docs packages", default="docs"
+        p = inquirer.prompt(
+            [
+                inquirer.Text(
+                    "docs_group",
+                    message="Dependency groups for docs packages",
+                    default="docs",
+                )
+            ]
         )
+        assert p is not None
+        self.docs_group = p["docs_group"]
+
         self.pyproject_data = self._read_toml(self.root / "pyproject.toml")
 
         # collect actions
