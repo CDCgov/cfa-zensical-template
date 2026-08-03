@@ -6,7 +6,7 @@
 
 !!! tip
 
-     If you're migrating from mkdocs, see [those instructions](migrating_from_mkdocs.md).
+     If you're migrating from mkdocs, see [those instructions](#migrating_from_mkdocs).
 
 ## Enable zensical for your project
 
