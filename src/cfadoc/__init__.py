@@ -75,7 +75,7 @@ class CLI:
         self.console = Console()
         self.template_data = {}
         self.post_msgs = []
-        self.root = Path(root).expanduser()
+        self.root = Path(root).expanduser().absolute()
 
     def msg(self, *args):
         """
