@@ -389,18 +389,20 @@ class CLI:
         command.append(dep.name)
         _run(command)
 
-    def _detect_package_name(self) -> str:
-        pyproject_data = self._read_toml(self.root / "pyproject.toml")
-        project_name = pyproject_data["project"]["name"]
+    def _detect_project_name(self) -> str:
+        return self._read_toml(self.root / "pyproject.toml")["project"]["name"]
+
+    def _detect_package_name(self) -> str | None:
+        project_name = self._detect_project_name()
         package_name = project_name.replace("-", "_")
 
         src = self.root / "src"
-        if src.exists():
-            assert (src / package_name / "__init__.py").exists()
+        if (src.exists() and (src / package_name / "__init__.py").exists()) or (
+            self.root / package_name / "__init__.py"
+        ).exists():
+            return package_name
         else:
-            assert (self.root / package_name / "__init__.py").exists()
-
-        return package_name
+            return None
 
     def _validate_build(self) -> list[Action]:
         command = ["uv", "run"]
@@ -442,14 +444,15 @@ class CLI:
         python_path = "src" if (self.root / "src").exists() else self.root
         python_path = self._text("Path to Python package root", str(python_path))
 
-        package_name = self._detect_package_name()
-        self.template_data["project_name"] = package_name
+        project_name = self._detect_project_name()
+        self.template_data["project_name"] = project_name
         self.template_data["repo_owner"] = repo_owner
         self.template_data["repo_name"] = repo_name
-        self.template_data["site_name"] = package_name
+        self.template_data["site_name"] = project_name
         self.template_data["site_url"] = site_url
         self.template_data["repo_url"] = repo_url
         self.template_data["python_path"] = python_path
+        self.template_data["package_name"] = self._detect_package_name()
 
         self.docs_group = self._text(
             "Dependency group for docs packages", default="docs"
